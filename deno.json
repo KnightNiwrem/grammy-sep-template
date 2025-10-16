@@ -1,0 +1,19 @@
+{
+  "tasks": {
+    "fmt": "deno fmt",
+    "lint": "deno lint",
+    "test": "deno test"
+  },
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true
+  },
+  "imports": {
+    "grammy": "https://deno.land/x/grammy@v1.38.2/mod.ts",
+    "grammy/convenience": "https://deno.land/x/grammy@v1.38.2/convenience/session.ts",
+    "grammy/conversations": "https://deno.land/x/grammy_conversations@v2.1.0/mod.ts",
+    "std/assert": "jsr:@std/assert@1",
+    "std/testing/bdd": "jsr:@std/testing@1/bdd"
+  }
+}
