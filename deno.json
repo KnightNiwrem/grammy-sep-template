@@ -1,0 +1,23 @@
+{
+  "imports": {
+    "grammy": "https://lib.deno.dev/x/grammy@v1/mod.ts",
+    "@std/expect": "jsr:@std/expect",
+    "@std/testing/bdd": "jsr:@std/testing/bdd"
+  },
+  "compilerOptions": {
+    "strict": true
+  },
+  "tasks": {
+    "fmt": "deno fmt",
+    "lint": "deno lint",
+    "test": "deno test"
+  },
+  "fmt": {
+    "include": ["src", "tests", "deno.json"]
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  }
+}
