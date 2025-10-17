@@ -1,5 +1,4 @@
-import type { Context, MiddlewareFn } from "grammy";
-import type { StorageAdapter } from "./storage.ts";
+import type { Context, MiddlewareFn, StorageAdapter } from "grammy";
 
 /**
  * A single text entry in the vault.

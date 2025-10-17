@@ -15,4 +15,4 @@ export type {
   VaultFlavor,
   VaultOptions,
 } from "./plugin.ts";
-export type { StorageAdapter } from "./storage.ts";
+export type { StorageAdapter } from "grammy";
