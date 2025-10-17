@@ -1,20 +1,15 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Bot, Context } from "grammy";
+import { Bot, Context, MemorySessionStorage } from "grammy";
 import {
-  plugin,
-  type PluginData,
-  type PluginFlavor,
-  type StorageAdapter,
+  vault,
+  type VaultData,
+  type VaultEntry,
+  type VaultFlavor,
 } from "../src/mod.ts";
 
-// Custom storage adapter for testing that extends StorageAdapter
-interface TestStorageAdapter extends StorageAdapter<PluginData> {
-  data: Map<string, PluginData>;
-}
-
-// Type alias for bot with plugin flavor
-type PluginContext = Context & PluginFlavor<PluginData>;
+// Type alias for bot with vault flavor
+type VaultContext = Context & VaultFlavor;
 
 // Mock bot info for testing
 const mockBotInfo = {
@@ -29,56 +24,106 @@ const mockBotInfo = {
   has_main_web_app: false,
 };
 
-describe("Plugin with StorageAdapter", () => {
+describe("Text Vault Plugin", () => {
   describe("Memory Storage", () => {
-    let bot: Bot<PluginContext>;
+    let bot: Bot<VaultContext>;
 
     beforeEach(() => {
-      bot = new Bot<PluginContext>("dummy-token", { botInfo: mockBotInfo });
+      bot = new Bot<VaultContext>("dummy-token", { botInfo: mockBotInfo });
     });
 
-    it("should initialize with default data", async () => {
-      bot.use(
-        plugin({
-          initial: () => ({ exampleCounter: 0 }),
-        }),
-      );
+    it("should initialize with empty vault", async () => {
+      bot.use(vault({
+        storage: new MemorySessionStorage<VaultData>(),
+      }));
 
-      let capturedData: PluginData | undefined;
+      let capturedVault: VaultData | undefined;
 
       bot.on("message", (ctx) => {
-        capturedData = ctx.pluginData;
+        capturedVault = ctx.vault;
       });
 
-      // Simulate an update
       // @ts-ignore: simplified update for testing
       await bot.handleUpdate({
         update_id: 1,
         message: {
           message_id: 1,
           date: Date.now() / 1000,
-          chat: { id: 123, type: "private", first_name: "Test" },
+          chat: { id: 123, type: "private" as const, first_name: "Test" },
           from: { id: 456, is_bot: false, first_name: "Test" },
           text: "Hello",
         },
       });
 
-      expect(capturedData).toBeDefined();
-      expect(capturedData?.exampleCounter).toBe(0);
+      expect(capturedVault).toBeDefined();
+      expect(capturedVault?.entries).toEqual([]);
     });
 
-    it("should persist data across updates", async () => {
+    it("should add entries to vault", async () => {
       let callCount = 0;
 
-      bot.use(
-        plugin({
-          initial: () => ({ exampleCounter: 0 }),
-        }),
-      );
+      bot.use(vault({
+        storage: new MemorySessionStorage<VaultData>(),
+      }));
 
       bot.on("message", (ctx) => {
         callCount++;
-        ctx.pluginData.exampleCounter++;
+        if (callCount === 1) {
+          const entry: VaultEntry = {
+            id: "test-id-1",
+            text: "Test entry",
+            createdAt: Date.now(),
+          };
+          ctx.vault.entries.push(entry);
+        }
+      });
+
+      // First update - add entry
+      // @ts-ignore: simplified update for testing
+      await bot.handleUpdate({
+        update_id: 1,
+        message: {
+          message_id: 1,
+          date: Date.now() / 1000,
+          chat: { id: 123, type: "private" as const, first_name: "Test" },
+          from: { id: 456, is_bot: false, first_name: "Test" },
+          text: "Hello",
+        },
+      });
+
+      expect(callCount).toBe(1);
+
+      // Second update - verify entry persisted
+      // @ts-ignore: simplified update for testing
+      await bot.handleUpdate({
+        update_id: 2,
+        message: {
+          message_id: 2,
+          date: Date.now() / 1000,
+          chat: { id: 123, type: "private" as const, first_name: "Test" },
+          from: { id: 456, is_bot: false, first_name: "Test" },
+          text: "Hello again",
+        },
+      });
+
+      expect(callCount).toBe(2);
+    });
+
+    it("should persist entries across updates", async () => {
+      let entriesCount = 0;
+
+      bot.use(vault({
+        storage: new MemorySessionStorage<VaultData>(),
+      }));
+
+      bot.on("message", (ctx) => {
+        const entry: VaultEntry = {
+          id: `entry-${ctx.vault.entries.length + 1}`,
+          text: `Entry ${ctx.vault.entries.length + 1}`,
+          createdAt: Date.now(),
+        };
+        ctx.vault.entries.push(entry);
+        entriesCount = ctx.vault.entries.length;
       });
 
       const update = {
@@ -88,106 +133,99 @@ describe("Plugin with StorageAdapter", () => {
           date: Date.now() / 1000,
           chat: { id: 123, type: "private" as const, first_name: "Test" },
           from: { id: 456, is_bot: false, first_name: "Test" },
-          text: "Hello",
+          text: "Message",
         },
       };
 
-      // First update
-      // @ts-ignore: simplified update for testing
-      await bot.handleUpdate(update);
-      expect(callCount).toBe(1);
+      // Add 3 entries
+      for (let i = 1; i <= 3; i++) {
+        // @ts-ignore: simplified update for testing
+        await bot.handleUpdate({ ...update, update_id: i });
+      }
 
-      // Second update - counter should increment
-      // @ts-ignore: simplified update for testing
-      await bot.handleUpdate({ ...update, update_id: 2 });
-      expect(callCount).toBe(2);
-
-      // Third update - verify final count
-      // @ts-ignore: simplified update for testing
-      await bot.handleUpdate({ ...update, update_id: 3 });
-      expect(callCount).toBe(3);
+      expect(entriesCount).toBe(3);
     });
-  });
 
-  describe("Custom Storage Adapter", () => {
-    it("should work with custom storage adapter", async () => {
-      // Create a custom storage adapter for testing
-      const storage: TestStorageAdapter = {
-        data: new Map<string, PluginData>(),
-        read(key: string) {
-          return this.data.get(key);
-        },
-        write(key: string, value: PluginData) {
-          this.data.set(key, value);
-        },
-        delete(key: string) {
-          this.data.delete(key);
-        },
-      };
+    it("should delete entries from vault", async () => {
+      bot.use(vault({
+        storage: new MemorySessionStorage<VaultData>(),
+      }));
 
-      const bot = new Bot<PluginContext>("dummy-token", {
-        botInfo: mockBotInfo,
+      // First update: add entry
+      bot.on("message", (ctx) => {
+        if (ctx.message.text === "add") {
+          ctx.vault.entries.push({
+            id: "to-delete",
+            text: "Delete me",
+            createdAt: Date.now(),
+          });
+        } else if (ctx.message.text === "delete") {
+          const index = ctx.vault.entries.findIndex((e) =>
+            e.id === "to-delete"
+          );
+          if (index !== -1) {
+            ctx.vault.entries.splice(index, 1);
+          }
+        }
       });
 
-      bot.use(
-        plugin({
-          initial: () => ({ exampleCounter: 10 }),
-          storage,
-        }),
-      );
+      const baseUpdate = {
+        message: {
+          message_id: 1,
+          date: Date.now() / 1000,
+          chat: { id: 123, type: "private" as const, first_name: "Test" },
+          from: { id: 456, is_bot: false, first_name: "Test" },
+        },
+      };
 
+      // Add entry
+      // @ts-ignore: simplified update for testing
+      await bot.handleUpdate({
+        update_id: 1,
+        message: { ...baseUpdate.message, text: "add" },
+      });
+
+      // Delete entry
+      // @ts-ignore: simplified update for testing
+      await bot.handleUpdate({
+        update_id: 2,
+        message: { ...baseUpdate.message, text: "delete" },
+      });
+
+      // Verify deletion
+      let finalEntries: VaultEntry[] = [];
       bot.on("message", (ctx) => {
-        ctx.pluginData.exampleCounter += 5;
+        finalEntries = ctx.vault.entries;
       });
 
       // @ts-ignore: simplified update for testing
       await bot.handleUpdate({
-        update_id: 1,
-        message: {
-          message_id: 1,
-          date: Date.now() / 1000,
-          chat: { id: 789, type: "private", first_name: "Test" },
-          from: { id: 456, is_bot: false, first_name: "Test" },
-          text: "Test",
-        },
+        update_id: 3,
+        message: { ...baseUpdate.message, text: "check" },
       });
 
-      // Verify storage was written to
-      const stored = storage.data.get("789");
-      expect(stored).toBeDefined();
-      expect(stored?.exampleCounter).toBe(15);
+      expect(finalEntries.length).toBe(0);
     });
   });
 
   describe("Storage Key Options", () => {
     it("should use custom prefix", async () => {
-      const storage: TestStorageAdapter = {
-        data: new Map<string, PluginData>(),
-        read(key: string) {
-          return this.data.get(key);
-        },
-        write(key: string, value: PluginData) {
-          this.data.set(key, value);
-        },
-        delete(key: string) {
-          this.data.delete(key);
-        },
-      };
-
-      const bot = new Bot<PluginContext>("dummy-token", {
+      const storage = new MemorySessionStorage<VaultData>();
+      const bot = new Bot<VaultContext>("dummy-token", {
         botInfo: mockBotInfo,
       });
 
-      bot.use(
-        plugin({
-          initial: () => ({ exampleCounter: 0 }),
-          storage,
-          prefix: "mybot:",
-        }),
-      );
+      bot.use(vault({
+        storage,
+        prefix: "myvault:",
+      }));
 
       bot.on("message", (ctx) => {
-        ctx.pluginData.exampleCounter++;
+        ctx.vault.entries.push({
+          id: "test",
+          text: "Test",
+          createdAt: Date.now(),
+        });
       });
 
       // @ts-ignore: simplified update for testing
@@ -196,61 +234,68 @@ describe("Plugin with StorageAdapter", () => {
         message: {
           message_id: 1,
           date: Date.now() / 1000,
-          chat: { id: 999, type: "private", first_name: "Test" },
+          chat: { id: 999, type: "private" as const, first_name: "Test" },
           from: { id: 456, is_bot: false, first_name: "Test" },
           text: "Test",
         },
       });
 
-      // Verify prefix was applied
-      expect(storage.data.has("mybot:999")).toBe(true);
+      // Verify the key with prefix was used
+      const data = await storage.read("myvault:456");
+      expect(data).toBeDefined();
+      expect(data?.entries.length).toBe(1);
     });
 
-    it("should use custom storage key function", async () => {
-      const storage: TestStorageAdapter = {
-        data: new Map<string, PluginData>(),
-        read(key: string) {
-          return this.data.get(key);
-        },
-        write(key: string, value: PluginData) {
-          this.data.set(key, value);
-        },
-        delete(key: string) {
-          this.data.delete(key);
-        },
-      };
-
-      const bot = new Bot<PluginContext>("dummy-token", {
+    it("should store data per user by default", async () => {
+      const storage = new MemorySessionStorage<VaultData>();
+      const bot = new Bot<VaultContext>("dummy-token", {
         botInfo: mockBotInfo,
       });
 
-      bot.use(
-        plugin({
-          initial: () => ({ exampleCounter: 0 }),
-          storage,
-          getStorageKey: (ctx) => ctx.from?.id.toString(),
-        }),
-      );
+      bot.use(vault({ storage }));
 
       bot.on("message", (ctx) => {
-        ctx.pluginData.exampleCounter++;
+        ctx.vault.entries.push({
+          id: `user-${ctx.from?.id}`,
+          text: "Test",
+          createdAt: Date.now(),
+        });
       });
 
+      // User 1
       // @ts-ignore: simplified update for testing
       await bot.handleUpdate({
         update_id: 1,
         message: {
           message_id: 1,
           date: Date.now() / 1000,
-          chat: { id: 111, type: "private", first_name: "Test" },
-          from: { id: 222, is_bot: false, first_name: "Test" },
+          chat: { id: 111, type: "private" as const, first_name: "Test" },
+          from: { id: 100, is_bot: false, first_name: "User1" },
           text: "Test",
         },
       });
 
-      // Verify user ID was used as key instead of chat ID
-      expect(storage.data.has("222")).toBe(true);
-      expect(storage.data.has("111")).toBe(false);
+      // User 2
+      // @ts-ignore: simplified update for testing
+      await bot.handleUpdate({
+        update_id: 2,
+        message: {
+          message_id: 2,
+          date: Date.now() / 1000,
+          chat: { id: 222, type: "private" as const, first_name: "Test" },
+          from: { id: 200, is_bot: false, first_name: "User2" },
+          text: "Test",
+        },
+      });
+
+      // Verify separate vaults
+      const user1Data = await storage.read("100");
+      const user2Data = await storage.read("200");
+
+      expect(user1Data?.entries.length).toBe(1);
+      expect(user2Data?.entries.length).toBe(1);
+      expect(user1Data?.entries[0].id).toBe("user-100");
+      expect(user2Data?.entries[0].id).toBe("user-200");
     });
   });
 });

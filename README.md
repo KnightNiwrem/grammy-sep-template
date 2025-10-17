@@ -1,146 +1,235 @@
-# grammY Plugin Template with StorageAdapter
+# grammY Text Vault Plugin - StorageAdapter Template
 
-A starter template for building grammY plugins that use the `StorageAdapter` interface for persistent data storage.
+A starter template for building grammY plugins that use the `StorageAdapter` interface. This example implements a text vault where users can save, list, and delete text entries.
 
 ## Features
 
-- ✅ **StorageAdapter Interface**: Built-in support for the standard grammY `StorageAdapter` interface
-- ✅ **In-Memory Storage**: Default memory storage for quick prototyping
-- ✅ **Custom Storage**: Easy integration with any storage backend (Redis, PostgreSQL, MongoDB, etc.)
+- ✅ **Uses grammY's StorageAdapter**: Imports `StorageAdapter` and `MemorySessionStorage` from grammY
+- ✅ **Meaningful Example**: Text vault for storing user notes/snippets
+- ✅ **Per-User Storage**: Each user has their own isolated vault
+- ✅ **Full CRUD Operations**: Add, list, and delete text entries
 - ✅ **Type-Safe**: Full TypeScript support with proper type definitions
 - ✅ **Tested**: Comprehensive test suite included
-- ✅ **Well-Documented**: Clear examples and documentation
+- ✅ **Production-Ready**: Proper error handling and edge case coverage
 
 ## Quick Start
 
 ```typescript
-import { Bot } from "grammy";
-import { plugin } from "./src/mod.ts";
+import { Bot, MemorySessionStorage } from "grammy";
+import { vault, type VaultData } from "./src/mod.ts";
 
 const bot = new Bot("YOUR_BOT_TOKEN");
 
-// Use with default in-memory storage
-bot.use(plugin({
-  initial: () => ({ exampleCounter: 0 }),
+// Install the vault plugin
+bot.use(vault({
+  storage: new MemorySessionStorage<VaultData>(),
 }));
 
-bot.on("message", (ctx) => {
-  ctx.pluginData.exampleCounter++;
-  ctx.reply(`Message count: ${ctx.pluginData.exampleCounter}`);
+// Save text to vault
+bot.command("save", (ctx) => {
+  const text = ctx.match;
+  if (!text) return ctx.reply("Provide text to save!");
+
+  ctx.vault.entries.push({
+    id: crypto.randomUUID(),
+    text,
+    createdAt: Date.now(),
+  });
+  ctx.reply("Saved to your vault!");
+});
+
+// List all entries
+bot.command("list", (ctx) => {
+  if (ctx.vault.entries.length === 0) {
+    return ctx.reply("Your vault is empty!");
+  }
+  const list = ctx.vault.entries
+    .map((e, i) => `${i + 1}. ${e.text}`)
+    .join("\n");
+  ctx.reply(`Your vault:\n\n${list}`);
+});
+
+// Delete an entry
+bot.command("delete", (ctx) => {
+  const id = ctx.match;
+  const index = ctx.vault.entries.findIndex((e) => e.id.startsWith(id));
+  if (index === -1) return ctx.reply("Entry not found!");
+  ctx.vault.entries.splice(index, 1);
+  ctx.reply("Deleted!");
 });
 
 bot.start();
 ```
 
-## Usage with Custom Storage
+## Running the Example
+
+```bash
+# Set your bot token
+export BOT_TOKEN="your-token-here"
+
+# Run the example bot
+deno run --allow-net --allow-env example.ts
+```
+
+The example bot includes:
+
+- `/start` - Show help
+- `/save <text>` - Save text to vault
+- `/list` - Show all saved entries
+- `/delete <id>` - Delete an entry
+- `/clear` - Clear entire vault
+- `/count` - Show entry count
+
+## Using with Persistent Storage
+
+The template uses grammY's standard `StorageAdapter` interface, so you can easily swap storage backends:
+
+### PostgreSQL (via @grammyjs/storages)
 
 ```typescript
-import { Bot } from "grammy";
-import { plugin, type PluginData, type StorageAdapter } from "./src/mod.ts";
+import { PostgresAdapter } from "@grammyjs/storage-postgres";
 
-// Implement your custom storage adapter
-const myStorage: StorageAdapter<PluginData> = {
-  async read(key: string) {
-    // Read from your database
-    return await db.get(key);
-  },
-  async write(key: string, value: PluginData) {
-    // Write to your database
-    await db.set(key, value);
-  },
-  async delete(key: string) {
-    // Delete from your database
-    await db.delete(key);
-  },
-};
+bot.use(vault({
+  storage: new PostgresAdapter({
+    host: "localhost",
+    database: "mybot",
+  }),
+}));
+```
 
-const bot = new Bot("YOUR_BOT_TOKEN");
+### Redis (via @grammyjs/storages)
 
-bot.use(plugin({
-  storage: myStorage,
-  initial: () => ({ exampleCounter: 0 }),
-  prefix: "mybot:", // Optional key prefix
+```typescript
+import { RedisAdapter } from "@grammyjs/storage-redis";
+
+bot.use(vault({
+  storage: new RedisAdapter({ url: "redis://localhost:6379" }),
+}));
+```
+
+### File System (via @grammyjs/storages)
+
+```typescript
+import { FileAdapter } from "@grammyjs/storage-file";
+
+bot.use(vault({
+  storage: new FileAdapter({ dirName: "vault-data" }),
 }));
 ```
 
 ## Customizing the Plugin
 
-### 1. Define Your Data Structure
+### 1. Modify the Data Structure
 
-Edit `src/plugin.ts` to define your plugin's data structure:
+Edit `src/plugin.ts` to change what data is stored:
 
 ```typescript
-export interface PluginData {
-  // Add your plugin-specific fields
-  customField: string;
-  anotherField: number;
+export interface VaultData {
+  entries: VaultEntry[];
+  settings?: {
+    maxEntries?: number;
+    autoDelete?: boolean;
+  };
 }
 ```
 
-### 2. Configure Storage Keys
+### 2. Change Storage Key Strategy
 
-By default, data is stored per chat. Customize this behavior:
+By default, data is stored per user. You can customize this:
 
 ```typescript
-bot.use(plugin({
-  // Store per user instead of per chat
-  getStorageKey: (ctx) => ctx.from?.id.toString(),
-  initial: () => ({ exampleCounter: 0 }),
+// Store per chat instead of per user
+bot.use(vault({
+  storage: myStorage,
+  getStorageKey: (ctx) => ctx.chat?.id.toString(),
+}));
+
+// Store per user-chat combination
+bot.use(vault({
+  storage: myStorage,
+  getStorageKey: (ctx) => `${ctx.from?.id}-${ctx.chat?.id}`,
 }));
 ```
 
-### 3. Add Plugin Logic
+### 3. Add Custom Logic
 
-Extend the plugin functionality in `src/plugin.ts` as needed for your use case.
+Extend the plugin with your own features:
 
-## Running Tests
+```typescript
+// Add entry validation
+bot.command("save", (ctx) => {
+  const text = ctx.match.trim();
 
-```bash
-deno task test
+  // Custom validation
+  if (text.length > 500) {
+    return ctx.reply("Text too long! Max 500 characters.");
+  }
+
+  if (ctx.vault.entries.length >= 100) {
+    return ctx.reply("Vault full! Max 100 entries.");
+  }
+
+  ctx.vault.entries.push({
+    id: crypto.randomUUID(),
+    text,
+    createdAt: Date.now(),
+  });
+  ctx.reply("Saved!");
+});
 ```
 
-## Development Tasks
+## Development
 
-- `deno task fmt` - Format code
-- `deno task lint` - Lint code
-- `deno task check` - Type check
-- `deno task ok` - Run all checks (format, lint, test, type check)
+```bash
+# Format code
+deno task fmt
+
+# Lint code
+deno task lint
+
+# Run tests
+deno task test
+
+# Type check
+deno task check
+
+# Run all checks
+deno task ok
+```
 
 ## Project Structure
 
 ```
 .
 ├── src/
-│   ├── mod.ts          # Main export file
-│   ├── plugin.ts       # Plugin implementation
-│   └── storage.ts      # StorageAdapter interface
+│   ├── mod.ts          # Main exports
+│   ├── plugin.ts       # Vault plugin implementation
+│   └── storage.ts      # StorageAdapter re-export
 ├── test/
 │   └── plugin_test.ts  # Test suite
+├── example.ts          # Example bot
 ├── deno.json           # Deno configuration
 └── README.md           # This file
 ```
 
-## StorageAdapter Interface
+## Building Your Own Plugin
 
-The `StorageAdapter<T>` interface provides:
+This template demonstrates the key patterns for StorageAdapter-based plugins:
 
-- `read(key: string): MaybePromise<T | undefined>` - Read data for a key
-- `write(key: string, value: T): MaybePromise<void>` - Write data for a key
-- `delete(key: string): MaybePromise<void>` - Delete data for a key
-- `has?(key: string): MaybePromise<boolean>` - Check if key exists (optional)
-- `readAllKeys?()` - List all keys (optional)
-- `readAllValues?()` - List all values (optional)
-- `readAllEntries?()` - List all key-value pairs (optional)
+1. **Import from grammY**: Use `StorageAdapter` and `MemorySessionStorage` from `"grammy"`
+2. **Define your data structure**: Create interfaces for your plugin's data
+3. **Create a context flavor**: Add your data to the context with a flavor interface
+4. **Implement middleware**: Handle read/write operations in your middleware
+5. **Require storage**: Make users provide their own `StorageAdapter`
 
-## Building Your Plugin
+The vault example shows real-world usage with CRUD operations, making it easy to adapt for your own plugin ideas.
 
-This template provides everything you need to start building a grammY plugin:
+## Why This Template?
 
-1. **Customize the data structure** in `src/plugin.ts`
-2. **Add plugin-specific logic** to handle your use case
-3. **Write tests** in `test/`
-4. **Update documentation** as you add features
-5. **Publish** when ready!
+- **No session confusion**: Clearly demonstrates StorageAdapter without mixing in session concepts
+- **Real example**: Text vault is a practical, understandable use case
+- **Best practices**: Uses grammY's built-in types and patterns
+- **Production-ready**: Includes error handling, tests, and documentation
 
 ## License
 

@@ -1,36 +1,42 @@
 import type { Context, MiddlewareFn } from "grammy";
-import type { MaybePromise, StorageAdapter } from "./storage.ts";
+import type { StorageAdapter } from "./storage.ts";
 
 /**
- * Data stored by this plugin for each chat/user.
+ * A single text entry in the vault.
  */
-export interface PluginData {
-  // Add your plugin-specific data fields here
-  exampleCounter: number;
+export interface VaultEntry {
+  id: string;
+  text: string;
+  createdAt: number;
 }
 
 /**
- * Context flavor that adds plugin data to the context object.
+ * Data stored by the text vault plugin for each user.
  */
-export interface PluginFlavor<D = PluginData> {
-  /**
-   * Plugin data on the context object.
-   *
-   * This property holds the persistent data for the current chat/user.
-   */
-  pluginData: D;
+export interface VaultData {
+  entries: VaultEntry[];
 }
 
 /**
- * Options for configuring the plugin.
+ * Context flavor that adds text vault functionality to the context object.
  */
-export interface PluginOptions<D = PluginData, C extends Context = Context> {
+export interface VaultFlavor {
   /**
-   * A function that produces an initial value for plugin data.
-   * This function will be called every time the storage returns undefined
-   * for a given key.
+   * Text vault data for the current user.
+   * Contains all stored text entries.
    */
-  initial?: () => D;
+  vault: VaultData;
+}
+
+/**
+ * Options for configuring the text vault plugin.
+ */
+export interface VaultOptions<C extends Context = Context> {
+  /**
+   * A function that produces an initial vault for new users.
+   * If not provided, an empty vault will be created.
+   */
+  initial?: () => VaultData;
 
   /**
    * An optional prefix to prepend to the storage key.
@@ -39,100 +45,98 @@ export interface PluginOptions<D = PluginData, C extends Context = Context> {
 
   /**
    * This option lets you generate your own storage keys per context object.
-   * The default implementation stores data per chat, as determined by `ctx.chatId`.
+   * The default implementation stores data per user ID.
    */
   getStorageKey?: (
-    ctx: Omit<C, "pluginData">,
-  ) => MaybePromise<string | undefined>;
+    ctx: Omit<C, "vault">,
+  ) => Promise<string | undefined> | string | undefined;
 
   /**
    * A storage adapter to your storage solution. Provides read, write, and
-   * delete access to the plugin middleware.
+   * delete access to the vault middleware.
    *
-   * The default implementation will store data in memory. The data will be
-   * lost whenever your bot restarts.
+   * You must provide a storage adapter. Example with memory storage:
+   * ```ts
+   * import { MemorySessionStorage } from "grammy";
+   * const storage = new MemorySessionStorage<VaultData>();
+   * ```
    */
-  storage?: StorageAdapter<D>;
+  storage: StorageAdapter<VaultData>;
 }
 
 /**
- * Default storage key function - stores data per chat.
+ * Default storage key function - stores data per user.
  */
 function defaultGetStorageKey(ctx: Context): string | undefined {
-  return ctx.chatId?.toString();
+  return ctx.from?.id.toString();
 }
 
 /**
- * In-memory storage adapter implementation.
- * This is used as the default when no storage is provided.
- * Data will be lost when the bot restarts.
- */
-class MemoryStorage<T> implements StorageAdapter<T> {
-  private storage = new Map<string, T>();
-
-  read(key: string): T | undefined {
-    return this.storage.get(key);
-  }
-
-  write(key: string, value: T): void {
-    this.storage.set(key, value);
-  }
-
-  delete(key: string): void {
-    this.storage.delete(key);
-  }
-
-  has(key: string): boolean {
-    return this.storage.has(key);
-  }
-
-  readAllKeys(): string[] {
-    return Array.from(this.storage.keys());
-  }
-
-  readAllValues(): T[] {
-    return Array.from(this.storage.values());
-  }
-
-  readAllEntries(): [string, T][] {
-    return Array.from(this.storage.entries());
-  }
-}
-
-/**
- * Creates middleware that adds persistent data storage to your bot.
+ * Creates middleware that adds a text vault storage to your bot.
  *
- * This middleware provides a way to store data per chat/user that persists
- * across updates. The data is accessed via `ctx.pluginData`.
+ * The text vault allows users to store, retrieve, and manage text entries.
+ * Each user has their own vault that persists across bot restarts (when using
+ * a persistent storage adapter).
  *
  * Example usage:
  * ```ts
- * import { Bot } from "grammy";
- * import { plugin } from "./mod.ts";
+ * import { Bot, MemorySessionStorage } from "grammy";
+ * import { vault } from "./mod.ts";
  *
  * const bot = new Bot("YOUR_BOT_TOKEN");
  *
- * // Use the plugin with default in-memory storage
- * bot.use(plugin({
- *   initial: () => ({ exampleCounter: 0 })
+ * // Use with a storage adapter
+ * bot.use(vault({
+ *   storage: new MemorySessionStorage<VaultData>(),
  * }));
  *
- * bot.on("message", (ctx) => {
- *   // Access and modify plugin data
- *   ctx.pluginData.exampleCounter++;
- *   console.log(`Message count: ${ctx.pluginData.exampleCounter}`);
+ * // Add text to vault
+ * bot.command("save", (ctx) => {
+ *   const text = ctx.match;
+ *   if (!text) return ctx.reply("Please provide text to save!");
+ *
+ *   const entry: VaultEntry = {
+ *     id: crypto.randomUUID(),
+ *     text,
+ *     createdAt: Date.now(),
+ *   };
+ *   ctx.vault.entries.push(entry);
+ *   ctx.reply(`Saved! Entry ID: ${entry.id}`);
+ * });
+ *
+ * // List all entries
+ * bot.command("list", (ctx) => {
+ *   const entries = ctx.vault.entries;
+ *   if (entries.length === 0) {
+ *     return ctx.reply("Your vault is empty!");
+ *   }
+ *   const list = entries.map((e, i) =>
+ *     `${i + 1}. ${e.text}\n   ID: ${e.id}`
+ *   ).join("\n\n");
+ *   ctx.reply(`Your vault:\n\n${list}`);
+ * });
+ *
+ * // Delete an entry
+ * bot.command("delete", (ctx) => {
+ *   const id = ctx.match;
+ *   const index = ctx.vault.entries.findIndex(e => e.id === id);
+ *   if (index === -1) {
+ *     return ctx.reply("Entry not found!");
+ *   }
+ *   ctx.vault.entries.splice(index, 1);
+ *   ctx.reply("Entry deleted!");
  * });
  * ```
  *
- * @param options Configuration options for the plugin
+ * @param options Configuration options for the vault plugin
  * @returns Middleware function
  */
-export function plugin<D = PluginData, C extends Context = Context>(
-  options: PluginOptions<D, C> = {},
-): MiddlewareFn<C & PluginFlavor<D>> {
+export function vault<C extends Context = Context>(
+  options: VaultOptions<C>,
+): MiddlewareFn<C & VaultFlavor> {
   const {
-    initial,
-    storage = new MemoryStorage<D>(),
+    initial = () => ({ entries: [] }),
+    storage,
     getStorageKey = defaultGetStorageKey,
     prefix = "",
   } = options;
@@ -143,8 +147,8 @@ export function plugin<D = PluginData, C extends Context = Context>(
 
     if (rawKey === undefined) {
       throw new Error(
-        "Cannot access plugin data because the storage key is undefined! " +
-          "This update does not belong to a chat, or you provided a custom " +
+        "Cannot access vault data because the storage key is undefined! " +
+          "This update does not have a user ID, or you provided a custom " +
           "getStorageKey function that returned undefined.",
       );
     }
@@ -152,32 +156,24 @@ export function plugin<D = PluginData, C extends Context = Context>(
     const key = prefix + rawKey;
 
     // Read existing data from storage
-    let data: D | undefined = await storage.read(key);
+    let data: VaultData | undefined = await storage.read(key);
 
     // Initialize with default value if data doesn't exist
-    if (data === undefined && initial !== undefined) {
+    if (data === undefined) {
       data = initial();
       await storage.write(key, data);
     }
 
-    // Ensure data is defined (if initial is not provided, data might still be undefined)
-    if (data === undefined) {
-      throw new Error(
-        "Plugin data is undefined! Please provide an 'initial' option to the plugin " +
-          "to set default values for new chats.",
-      );
-    }
-
     // Make data available on context
     // @ts-ignore: Adding property to context
-    ctx.pluginData = data;
+    ctx.vault = data;
 
     // Call downstream middleware
     await next();
 
     // Write back to storage after middleware completes
     // @ts-ignore: Property was added above
-    const updatedData: D | null | undefined = ctx.pluginData;
+    const updatedData: VaultData | null | undefined = ctx.vault;
 
     if (updatedData === null || updatedData === undefined) {
       // Delete data if set to null/undefined
