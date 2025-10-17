@@ -85,7 +85,6 @@ bot.command("list", (ctx) => {
     `Your vault (${entries.length} ${
       entries.length === 1 ? "entry" : "entries"
     }):\n\n${list}`,
-    { parse_mode: "HTML" },
   );
 });
 
