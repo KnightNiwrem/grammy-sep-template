@@ -7,7 +7,10 @@
  */
 
 import { Bot, MemorySessionStorage } from "grammy";
-import { vault, type VaultData, type VaultEntry } from "./src/mod.ts";
+import type { Context } from "grammy";
+import { vault, type VaultData, type VaultEntry, type VaultFlavor } from "../src/mod.ts";
+
+type VaultContext = Context & VaultFlavor;
 
 const token = Deno.env.get("BOT_TOKEN");
 if (!token) {
@@ -15,7 +18,7 @@ if (!token) {
   Deno.exit(1);
 }
 
-const bot = new Bot(token);
+const bot = new Bot<VaultContext>(token);
 
 // Install the vault plugin with in-memory storage
 bot.use(vault({
@@ -38,7 +41,7 @@ bot.command("start", (ctx) => {
 
 // Save command - add text to vault
 bot.command("save", (ctx) => {
-  const text = ctx.match.trim();
+  const text = ctx.match;
 
   if (!text) {
     return ctx.reply(
@@ -90,7 +93,7 @@ bot.command("list", (ctx) => {
 
 // Delete command - remove an entry by ID
 bot.command("delete", (ctx) => {
-  const id = ctx.match.trim();
+  const id = ctx.match;
 
   if (!id) {
     return ctx.reply("Please provide an entry ID!\n\nExample: /delete abc123");
